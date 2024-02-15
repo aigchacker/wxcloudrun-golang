@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net/http"
 	"wxcloudrun-golang/db"
 	"wxcloudrun-golang/service"
+
+	"github.com/labstack/echo/v4"
 )
 
 func main() {
@@ -13,8 +13,12 @@ func main() {
 		panic(fmt.Sprintf("mysql init failed with %+v", err))
 	}
 
-	http.HandleFunc("/", service.IndexHandler)
-	http.HandleFunc("/api/count", service.CounterHandler)
+	e := echo.New()
 
-	log.Fatal(http.ListenAndServe(":80", nil))
+	e.POST("/user-login-qrcode", service.GetLoginQrcode)
+	e.POST("/check-login/:code", service.CheckLogin)
+	e.Any("/wxmp/notify", service.WxmpNotify)
+
+	e.Logger.Fatal(e.Start(":443"))
+
 }

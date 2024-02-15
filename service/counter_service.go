@@ -1,159 +1,136 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"time"
 
-	"wxcloudrun-golang/db/dao"
-	"wxcloudrun-golang/db/model"
+	"log"
 
-	"gorm.io/gorm"
+	"github.com/cutesdk/cutesdk-go/wxmp"
+	"github.com/idoubi/goutils"
+	"github.com/labstack/echo/v4"
 )
 
-// JsonResult 返回结构
-type JsonResult struct {
-	Code     int         `json:"code"`
-	ErrorMsg string      `json:"errorMsg,omitempty"`
-	Data     interface{} `json:"data"`
+const (
+	appid            = "wx9eaf473f4a8eca98"               // wxmp appid
+	secret           = "ae5bf47ebb26bcb3903fa73065f91b3b" // wxmp secret
+	token            = "7VuyexreqaavPWgLHiemvBpiXme"
+	encodingAESKey   = "RwCnIeQvwkFFk0deJnsrA3WgZGQE2atglBZm4vw1bjQ"
+	subscribeMessage = "您好，欢迎关注瞬息照相馆。\n\n马上开始为你生成风格百变的AI写真照哦！"
+)
+
+func main() {
+	e := echo.New()
+
+	e.POST("/user-login-qrcode", GetLoginQrcode)
+	e.POST("/check-login/:code", CheckLogin)
+	e.Any("/wxmp/notify", WxmpNotify)
+
+	e.Logger.Fatal(e.Start(":443"))
 }
 
-// IndexHandler 计数器接口
-func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := getIndex()
+func GetLoginQrcode(c echo.Context) error {
+	// login scene
+	scene := "mplogin"
+	// expires: 5 minutes
+	var expires int64 = 300
+	qrcode, err := getSceneQrcode(scene, expires)
 	if err != nil {
-		fmt.Fprint(w, "内部错误")
-		return
-	}
-	fmt.Fprint(w, data)
-}
-
-// CounterHandler 计数器接口
-func CounterHandler(w http.ResponseWriter, r *http.Request) {
-	res := &JsonResult{}
-
-	if r.Method == http.MethodGet {
-		counter, err := getCurrentCounter()
-		if err != nil {
-			res.Code = -1
-			res.ErrorMsg = err.Error()
-		} else {
-			res.Data = counter.Count
-		}
-	} else if r.Method == http.MethodPost {
-		count, err := modifyCounter(r)
-		if err != nil {
-			res.Code = -1
-			res.ErrorMsg = err.Error()
-		} else {
-			res.Data = count
-		}
-	} else {
-		res.Code = -1
-		res.ErrorMsg = fmt.Sprintf("请求方法 %s 不支持", r.Method)
+		log.Printf("get mplogin qrcode failed: %v\n", err)
+		return c.String(500, "get login qrcode failed")
 	}
 
-	msg, err := json.Marshal(res)
+	loginCode := goutils.MD5(qrcode.Ticket)
+	cacheKey := fmt.Sprintf("lgt:%s", loginCode)
+
+	// todo setex cacheKey 0 expires
+
 	if err != nil {
-		fmt.Fprint(w, "内部错误")
-		return
+		log.Printf("get login qrcode falied: %v\n", err)
+		return c.String(500, "get login qrcode failed")
 	}
-	w.Header().Set("content-type", "application/json")
-	w.Write(msg)
+
+	return c.JSON(200, map[string]interface{}{
+		"login_code":  loginCode,
+		"login_qrurl": qrcode.Qrurl,
+		"expires":     expires,
+		"cache_key":   cacheKey,
+	})
 }
 
-// modifyCounter 更新计数，自增或者清零
-func modifyCounter(r *http.Request) (int32, error) {
-	action, err := getAction(r)
+func CheckLogin(c echo.Context) error {
+	loginCode := c.Param("code")
+
+	cacheKey := fmt.Sprintf("lgt:%s", loginCode)
+
+	// todo get user openid from cache
+
+	jwtToken := "xxx"
+
+	return c.JSON(200, map[string]interface{}{
+		"token":     jwtToken,
+		"cache_key": cacheKey,
+	})
+}
+
+func WxmpNotify(c echo.Context) error {
+	// 1. get wxmp notify EventKey(including login_code)
+	// 2. get user openid
+	// 3. set user openid to cacheKey(same with cacheKey in CheckLogin)
+
+	return nil
+}
+
+// SceneQrcode struct
+type SceneQrcode struct {
+	Scene   string `json:"scene"`
+	Expires int64  `json:"expires"`
+	Ticket  string `json:"ticket"`
+	Qrurl   string `json:"qrurl"`
+}
+
+func getSceneQrcode(scene string, expires int64) (*SceneQrcode, error) {
+	cli, _ := getWxmpClient()
+
+	uri := "/cgi-bin/qrcode/create"
+
+	params := map[string]interface{}{
+		"expire_seconds": expires,
+		"action_name":    "QR_STR_SCENE",
+		"action_info": map[string]interface{}{
+			"scene": map[string]interface{}{
+				"scene_str": scene,
+			},
+		},
+	}
+
+	res, err := cli.PostWithToken(uri, params)
 	if err != nil {
-		return 0, err
-	}
-
-	var count int32
-	if action == "inc" {
-		count, err = upsertCounter(r)
-		if err != nil {
-			return 0, err
-		}
-	} else if action == "clear" {
-		err = clearCounter()
-		if err != nil {
-			return 0, err
-		}
-		count = 0
-	} else {
-		err = fmt.Errorf("参数 action : %s 错误", action)
-	}
-
-	return count, err
-}
-
-// upsertCounter 更新或修改计数器
-func upsertCounter(r *http.Request) (int32, error) {
-	currentCounter, err := getCurrentCounter()
-	var count int32
-	createdAt := time.Now()
-	if err != nil && err != gorm.ErrRecordNotFound {
-		return 0, err
-	} else if err == gorm.ErrRecordNotFound {
-		count = 1
-		createdAt = time.Now()
-	} else {
-		count = currentCounter.Count + 1
-		createdAt = currentCounter.CreatedAt
-	}
-
-	counter := &model.CounterModel{
-		Id:        1,
-		Count:     count,
-		CreatedAt: createdAt,
-		UpdatedAt: time.Now(),
-	}
-	err = dao.Imp.UpsertCounter(counter)
-	if err != nil {
-		return 0, err
-	}
-	return counter.Count, nil
-}
-
-func clearCounter() error {
-	return dao.Imp.ClearCounter(1)
-}
-
-// getCurrentCounter 查询当前计数器
-func getCurrentCounter() (*model.CounterModel, error) {
-	counter, err := dao.Imp.GetCounter(1)
-	if err != nil {
+		log.Printf("get wxmp qrcode failed: %v\n", err)
 		return nil, err
 	}
 
-	return counter, nil
+	ticket := res.GetString("ticket")
+	if ticket == "" {
+		log.Printf("get wxmp qrcode failed: %s\n", res.String())
+		return nil, fmt.Errorf("get wxmp qrcode failed: %s", res.String())
+	}
+
+	qrurl := fmt.Sprintf("https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket=%s", ticket)
+
+	return &SceneQrcode{
+		Scene:   scene,
+		Expires: expires,
+		Ticket:  ticket,
+		Qrurl:   qrurl,
+	}, nil
 }
 
-// getAction 获取action
-func getAction(r *http.Request) (string, error) {
-	decoder := json.NewDecoder(r.Body)
-	body := make(map[string]interface{})
-	if err := decoder.Decode(&body); err != nil {
-		return "", err
-	}
-	defer r.Body.Close()
-
-	action, ok := body["action"]
-	if !ok {
-		return "", fmt.Errorf("缺少 action 参数")
+func getWxmpClient() (*wxmp.Client, error) {
+	opts := &wxmp.Options{
+		Appid:  appid,
+		Secret: secret,
+		Debug:  true,
 	}
 
-	return action.(string), nil
-}
-
-// getIndex 获取主页
-func getIndex() (string, error) {
-	b, err := ioutil.ReadFile("./index.html")
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return wxmp.NewClient(opts)
 }
