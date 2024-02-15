@@ -2,7 +2,7 @@
   "containers": [],
   "config": {
     "wxcloudrun-golang": {
-      "containerPort": 80,
+      "containerPort": 443,
       "minNum": 0,
       "maxNum": 5,
       "cpu": 1,
