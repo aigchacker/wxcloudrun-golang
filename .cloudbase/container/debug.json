@@ -20,9 +20,9 @@
         }
       ],
       "envParams": {
-        "MYSQL_USERNAME": "",
-        "MYSQL_PASSWORD": "",
-        "MYSQL_ADDRESS": ""
+        "MYSQL_USERNAME": "root",
+        "MYSQL_PASSWORD": "2PwNxZZTN!d",
+        "MYSQL_ADDRESS": "10.32.101.204:3306"
       },
       "customLogs": "stdout",
       "dataBaseName": "golang_demo",
