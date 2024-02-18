@@ -1,5 +1,12 @@
 {
-  "containers": [],
+  "containers": [
+    {
+      "name": "wxcloudrun-golang",
+      "containerId": "7c06111d2916fe4c1ce71a60a132831d465cebb523db1d049b3d10e276d5aff3",
+      "domain": "",
+      "ip": ""
+    }
+  ],
   "config": {
     "wxcloudrun-golang": {
       "containerPort": 443,

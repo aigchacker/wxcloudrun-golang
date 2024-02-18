@@ -12,6 +12,7 @@ COPY . .
 RUN go build -v -o myapp .
 
 # 运行
+EXPOSE 443
 CMD ["./myapp"]
 
 # 进入终端使用docker命令打包镜像和运行
