@@ -1,30 +1,23 @@
-FROM golang:1.18 as builder
+FROM golang:1.22.0-alpine
 
-# 指定构建过程中的工作目录
+# 设置工作目录
 WORKDIR /app
 
-# 将当前目录（dockerfile所在目录）下所有文件都拷贝到工作目录下（.dockerignore中文件除外）
-COPY . /app/
+# 安装依赖
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 
-# 执行代码编译命令。操作系统参数为linux，编译后的二进制产物命名为main，并存放在当前目录下。
-RUN GOOS=linux go build -o main .
+# 拷贝整个项目并执行编译命令
+COPY . .
+RUN go build -v -o myapp .
 
-# 选用运行时所用基础镜像（GO语言选择原则：尽量体积小、包含基础linux内容的基础镜像）
-FROM alpine:3.13
+# 运行
+CMD ["./myapp"]
 
-# 容器默认时区为UTC，如需使用上海时间请启用以下时区设置命令
-# RUN apk add tzdata && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo Asia/Shanghai > /etc/timezone
-
-# 使用 HTTPS 协议访问容器云调用证书安装
-RUN apk add ca-certificates
-
-# 指定运行时的工作目录
-WORKDIR /app
-
-# 将构建产物/app/main拷贝到运行时的工作目录中
-COPY --from=builder /app/main /app/index.html /app/
-
-# 执行启动命令
-# 写多行独立的CMD命令是错误写法！只有最后一行CMD命令会被执行，之前的都会被忽略，导致业务报错。
-# 请参考[Docker官方文档之CMD命令](https://docs.docker.com/engine/reference/builder/#cmd)
-CMD ["app/main"]
+# 进入终端使用docker命令打包镜像和运行
+# $ docker build -t your_image_name .
+# $ docker run -it --rm --name your_container_name your_image_name
+# -it选项表示以交互模式运行容器，--rm选项表示容器停止后立即删除
+# 正常运行后可以查看container的ip地址，使用ip:443访问
+# docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <container_name_or_id>
+# curl <container_ip>:443
